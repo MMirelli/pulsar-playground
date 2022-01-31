@@ -230,9 +230,3 @@ function configure_georep() {
     echo "Wait 15 seconds..."
     sleep 15
 }
-
-# if [[ $command == "start" ]]; then
-#     configure_georep
-# else
-#     unconfigure_georep
-# fi
