@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 norestart="${2:-1}"
 
 : "${CONTEXT_A:="context-a"}"
 : "${CONTEXT_B:="context-b"}"
+export DIFFERENT_CLUSTER_IDS="${DIFFERENT_CLUSTER_IDS:=0}"
 
 georep_tenant="georep"
 georep_namespace="${georep_tenant}/replicated"
@@ -17,18 +17,23 @@ function set_current_cluster() {
 set_current_cluster "$CONTEXT_A"
 
 function get_cluster_id (){
-    local is_same=${1:-1}
-    if [[ $is_same -eq 1 ]]; then
+    if [[ ${different_cluster_ids} -eq 0 ]]; then
         echo "pulsar"
     else
-        echo "cluster-$(ctx=$(kubectl config current-context); echo ${ctx/*-})"
+        if [[ "$(kubectl config current-context)" == "${CONTEXT_A}" ]]; then
+            echo "cluster-a"
+        elif [[ "$(kubectl config current-context)" == "${CONTEXT_B}" ]]; then
+            echo "cluster-b"
+        else
+            return 1
+        fi
     fi
 }
 
 function run_command_in_cluster() {
     local admin_script="$1"
     local flags="${2:-"-x"}"
-    kubectl exec -i -n "pulsar" "$(kubectl get pod -n "pulsar" -l component=broker -o name | head -1)" -c "$(get_cluster_id 1)-broker" -- bash -c $flags "export PATH=/pulsar/bin:\$PATH; ${admin_script}"
+    kubectl exec -i -n "pulsar" "$(kubectl get pod -n "pulsar" -l component=broker -o name | head -1)" -c "$(different_cluster_ids=${DIFFERENT_CLUSTER_IDS} get_cluster_id 1)-broker" -- bash -c $flags "export PATH=/pulsar/bin:\$PATH; ${admin_script}"
 }
 
 function stop_georep() {
