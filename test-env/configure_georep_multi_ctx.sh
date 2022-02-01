@@ -21,9 +21,9 @@ function get_cluster_id (){
         echo "pulsar"
     else
         if [[ "$(kubectl config current-context)" == "${CONTEXT_A}" ]]; then
-            echo "cluster-a"
+            echo "pulsarsc2"
         elif [[ "$(kubectl config current-context)" == "${CONTEXT_B}" ]]; then
-            echo "cluster-b"
+            echo "pulsar"
         else
             return 1
         fi
