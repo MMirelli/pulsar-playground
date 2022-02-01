@@ -55,7 +55,6 @@ function is_cluster() {
     fi
     
 }
-set_current_cluster "$CONTEXT_A"
 
 function get_cluster_fn_override (){
     if [[ $(is_cluster ${CONTEXT_A}) -eq 1 ]]; then
