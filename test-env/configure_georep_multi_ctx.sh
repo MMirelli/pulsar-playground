@@ -4,8 +4,11 @@ norestart="${2:-1}"
 : "${CONTEXT_A:="context-a"}"
 : "${CONTEXT_B:="context-b"}"
 
-: "${NAMESPACE:="pulsar-poc-dev"}"
+: "${FULLNAME_OVERRIDE_CONTEXT_A:=""}"
+: "${FULLNAME_OVERRIDE_CONTEXT_B:=""}"
 
+: "${NAMESPACE_CONTEXT_A:=""}"
+: "${NAMESPACE_CONTEXT_B:=""}"
 export DIFFERENT_CLUSTER_IDS="${DIFFERENT_CLUSTER_IDS:=0}"
 
 georep_tenant="georep"
@@ -18,27 +21,42 @@ function set_current_cluster() {
     export KUBECONFIG="$1"
     echo "\$KUBECONFIG=$KUBECONFIG"
     # kubectl config use-context "$1"
+function is_cluster() {
+    
+    local current_cluster="$1"
+    if [[ $CLUSTER_SWITCH_MODE == "kubeconfig" ]]; then
+        [[ ${KUBECONFIG} == "${current_cluster}" ]] && echo 1 || echo 0
+    elif [[ $CLUSTER_SWITCH_MODE == "context" ]]; then
+        [[ $(kubectl config current-context) == "${current_cluster}" ]] && echo 1 || echo 0
+    fi
+    
 }
 set_current_cluster "$CONTEXT_A"
 
-function get_cluster_id (){
-    if [[ ${different_cluster_ids} -eq 0 ]]; then
-        echo "pulsar"
+function get_cluster_fn_override (){
+    if [[ $(is_cluster ${CONTEXT_A}) -eq 1 ]]; then
+        echo "$FULLNAME_OVERRIDE_CONTEXT_A"
+    elif [[ $(is_cluster ${CONTEXT_B}) -eq 1 ]]; then
+        echo "$FULLNAME_OVERRIDE_CONTEXT_B"
     else
-        if [[ "$(kubectl config current-context)" == "${CONTEXT_A}" ]]; then
-            echo "pulsarsc2"
-        elif [[ "$(kubectl config current-context)" == "${CONTEXT_B}" ]]; then
-            echo "pulsar"
-        else
-            return 1
-        fi
+        return 1
+    fi
+}
+
+function get_cluster_namespace (){
+    if [[ $(is_cluster ${CONTEXT_A}) -eq 1 ]]; then
+        echo "$NAMESPACE_CONTEXT_A"
+    elif [[ $(is_cluster ${CONTEXT_B}) -eq 1 ]]; then
+        echo "$NAMESPACE_CONTEXT_B"
+    else
+        return 1
     fi
 }
 
 function run_command_in_cluster() {
     local admin_script="$1"
     local flags="${2:-"-x"}"
-    kubectl exec -i -n "${NAMESPACE}" "$(kubectl get pod -n "${NAMESPACE}" -l component=broker -o name | head -1)" -c "$(different_cluster_ids=${DIFFERENT_CLUSTER_IDS} get_cluster_id 1)-broker" -- bash -c $flags "export PATH=/pulsar/bin:\$PATH; ${admin_script}"
+    kubectl exec -i -n "$(get_cluster_namespace)" "$(kubectl get pod -n "$(get_cluster_namespace)" -l component=broker -o name | head -1)" -c "$(get_cluster_fn_override)-broker" -- bash -c $flags "export PATH=/pulsar/bin:\$PATH; ${admin_script}"
 }
 
 function stop_georep() {
@@ -164,7 +182,7 @@ function unconfigure_georep() {
 
     if [[ $norestart -ne 1 ]]; then
         # restart brokers
-        kubectl rollout restart deployment -n ${NAMESPACE} cluster-a-broker
+        kubectl rollout restart deployment -n $(get_cluster_namespace) cluster-a-broker
     fi
 
     set_current_cluster $CONTEXT_B
@@ -174,13 +192,13 @@ function unconfigure_georep() {
 
     if [[ $norestart -ne 1 ]]; then
         # restart brokers
-        kubectl rollout restart deployment -n ${NAMESPACE} cluster-b-broker
+        kubectl rollout restart deployment -n $(get_cluster_namespace) cluster-b-broker
 
         echo "Wait for brokers to restart..."
-        set_current_cluster $CONTEXT_A
-        kubectl rollout status deployment -n ${NAMESPACE} cluster-a-broker
-        set_current_cluster $CONTEXT_B
-        kubectl rollout status deployment -n ${NAMESPACE} cluster-b-broker
+        switch_cluster $CONTEXT_A
+        kubectl rollout status deployment -n $(get_cluster_namespace) cluster-a-broker
+        switch_cluster $CONTEXT_B
+        kubectl rollout status deployment -n $(get_cluster_namespace) cluster-b-broker
     fi
 
     echo "Wait 10 seconds"
@@ -188,12 +206,12 @@ function unconfigure_georep() {
 }
 
 function expose_pulsar_proxy (){
-    local node_running_proxy="$(kubectl -n ${NAMESPACE} get po -l component=proxy \
+    local node_running_proxy="$(kubectl -n $(get_cluster_namespace) get po -l component=proxy \
                                                                      -o jsonpath="{.items[0].spec.nodeName}" )"
     local node_running_proxy_ip="$(kubectl get node \
                                                              "${node_running_proxy}" -o jsonpath="{.status.addresses[0].address}")"
     
-    kubectl patch "$(kubectl -n ${NAMESPACE} get svc -l component=proxy -o name)" -n ${NAMESPACE} -p \
+    kubectl patch "$(kubectl -n $(get_cluster_namespace) get svc -l component=proxy -o name)" -n $(get_cluster_namespace) -p \
             "{\"spec\": {\"type\": \"LoadBalancer\", \"externalIPs\": [\"${node_running_proxy_ip}\"]}}"
 }
 
@@ -201,7 +219,7 @@ function initialise_georeplication_variables (){
     export cluster_a_id="${CLUSTER_A_NAME}"
     
     kubectl config use-context "$(nutils_get_cluster_context "${CLUSTER_A_NAME}")" && \
-        export cluster_a_hostname="$(kubectl -n ${NAMESPACE} get po -l component=proxy \
+        export cluster_a_hostname="$(kubectl -n $(get_cluster_namespace) get po -l component=proxy \
                                                                              -o jsonpath="{.items[0].spec.nodeName}" )" && \
         echo "cluster_a_hostname=${cluster_a_hostname}" || \
         echo "Error: impossible to set cluster_a_hostname"
@@ -209,7 +227,7 @@ function initialise_georeplication_variables (){
     export cluster_b_id="${CLUSTER_B_NAME}"
     
     kubectl config use-context "$(nutils_get_cluster_context "${CLUSTER_B_NAME}")" && \
-        export cluster_b_hostname="$(kubectl -n ${NAMESPACE} get po -l component=proxy \
+        export cluster_b_hostname="$(kubectl -n $(get_cluster_namespace) get po -l component=proxy \
                                                                              -o jsonpath="{.items[0].spec.nodeName}" )"  && \
         echo "cluster_b_hostname=${cluster_b_hostname}" || \
         echo "Error: impossible to set cluster_b_hostname"
@@ -229,7 +247,13 @@ function configure_georep() {
     set_current_cluster $CONTEXT_B
     expose_pulsar_proxy
     
-    initialise_georeplication_variables
+    switch_cluster $CONTEXT_A
+    local cluster_a_hostname="$(kubectl -n "$(get_cluster_namespace)" get po -l component=proxy \
+                                              -o jsonpath="{.items[0].spec.nodeName}" )"
+
+    switch_cluster $CONTEXT_B
+    local cluster_b_hostname="$(kubectl -n "$(get_cluster_namespace)" get po -l component=proxy \
+                                              -o jsonpath="{.items[0].spec.nodeName}" )"
     
     # setup georeplication and create topics
     set_current_cluster $CONTEXT_A
