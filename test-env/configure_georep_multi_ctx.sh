@@ -16,6 +16,7 @@ partition_count=10
 
 function set_current_cluster() {
     export KUBECONFIG="$1"
+    echo "\$KUBECONFIG=$KUBECONFIG"
     # kubectl config use-context "$1"
 }
 set_current_cluster "$CONTEXT_A"
