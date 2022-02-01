@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 norestart="${2:-1}"
 
-: "${CONTEXT_A:="context-a"}"
-: "${CONTEXT_B:="context-b"}"
+: "${CONTEXT_A:=""}"
+: "${CONTEXT_B:=""}"
 
 : "${FULLNAME_OVERRIDE_CONTEXT_A:=""}"
 : "${FULLNAME_OVERRIDE_CONTEXT_B:=""}"
@@ -17,10 +17,27 @@ georep_topicbase="perftest"
 georep_topic="persistent://${georep_namespace}/${georep_topicbase}"
 partition_count=10
 
-function set_current_cluster() {
-    export KUBECONFIG="$1"
-    echo "\$KUBECONFIG=$KUBECONFIG"
-    # kubectl config use-context "$1"
+function switch_cluster() {
+    
+    local current_cluster="$1"
+
+    if [[ $current_cluster == "${CONTEXT_A}" ]]; then
+        echo "Switching to cluster-a"
+    elif [[ $current_cluster == "${CONTEXT_B}" ]]; then
+        echo "Switching to cluster-b"
+    else
+        echo "Unknown k8s context / kubeconfig: ${current_cluster} "
+    fi
+    
+    if [[ $CLUSTER_SWITCH_MODE == "kubeconfig" ]]; then
+        export KUBECONFIG="${current_cluster}"
+        echo "KUBECONFIG=$KUBECONFIG"
+    elif [[ $CLUSTER_SWITCH_MODE == "context" ]]; then
+        kubectl config use-context "${current_cluster}"
+    fi
+    
+}
+
 function is_cluster() {
     
     local current_cluster="$1"
@@ -161,13 +178,13 @@ function unconfigure_georep() {
     fi
 
     # georeplication has to be stopped before deleting topics
-    set_current_cluster $CONTEXT_A
+    switch_cluster $CONTEXT_A
     stop_georep "${cluster_a_id}"
-    set_current_cluster $CONTEXT_B
+    switch_cluster $CONTEXT_B
     stop_georep "${cluster_b_id}"
-    set_current_cluster $CONTEXT_A
+    switch_cluster $CONTEXT_A
     delete_georep_peer_cluster "${cluster_b_id}"
-    set_current_cluster $CONTEXT_B
+    switch_cluster $CONTEXT_B
     delete_georep_peer_cluster "${cluster_a_id}"
 
     # wait for georep to stop
@@ -175,7 +192,7 @@ function unconfigure_georep() {
     sleep 10
 
     # delete topics
-    set_current_cluster $CONTEXT_A
+    switch_cluster $CONTEXT_A
     unload_georep_topic
     delete_georep_topic
     delete_georep_namespace
@@ -185,7 +202,7 @@ function unconfigure_georep() {
         kubectl rollout restart deployment -n $(get_cluster_namespace) cluster-a-broker
     fi
 
-    set_current_cluster $CONTEXT_B
+    switch_cluster $CONTEXT_B
     unload_georep_topic
     delete_georep_topic
     delete_georep_namespace
@@ -236,15 +253,15 @@ function initialise_georeplication_variables (){
 function configure_georep() {
     echo "Configuring geo-replication..."
 
-    set_current_cluster $CONTEXT_A
-    token_a=$(run_command_in_cluster "cat /pulsar/token-superuser/superuser.jwt" "")
-    set_current_cluster $CONTEXT_B
-    token_b=$(run_command_in_cluster "cat /pulsar/token-superuser/superuser.jwt" "")
+    switch_cluster $CONTEXT_A
+    local token_a=$(run_command_in_cluster "cat /pulsar/token-superuser/superuser.jwt" "")
+    switch_cluster $CONTEXT_B
+    local token_b=$(run_command_in_cluster "cat /pulsar/token-superuser/superuser.jwt" "")
 
-    set_current_cluster $CONTEXT_A
+    switch_cluster $CONTEXT_A
     expose_pulsar_proxy
     
-    set_current_cluster $CONTEXT_B
+    switch_cluster $CONTEXT_B
     expose_pulsar_proxy
     
     switch_cluster $CONTEXT_A
@@ -256,9 +273,9 @@ function configure_georep() {
                                               -o jsonpath="{.items[0].spec.nodeName}" )"
     
     # setup georeplication and create topics
-    set_current_cluster $CONTEXT_A
+    switch_cluster $CONTEXT_A
     set_up_georep "${cluster_a_id}" "${cluster_b_hostname}" "${cluster_b_id}" "${token_b}"
-    set_current_cluster $CONTEXT_B
+    switch_cluster $CONTEXT_B
     set_up_georep "${cluster_b_id}" "${cluster_a_hostname}" "${cluster_a_id}" "${token_a}"
 
     echo "Wait 15 seconds..."
