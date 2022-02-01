@@ -9,6 +9,12 @@ norestart="${2:-1}"
 
 : "${NAMESPACE_CONTEXT_A:=""}"
 : "${NAMESPACE_CONTEXT_B:=""}"
+
+CLUSTER_A_ID="cluster-a"
+CLUSTER_B_ID="cluster-b"
+
+: "${CLUSTER_SWITCH_MODE:="kubeconfig"}"
+
 export DIFFERENT_CLUSTER_IDS="${DIFFERENT_CLUSTER_IDS:=0}"
 
 georep_tenant="georep"
@@ -271,6 +277,9 @@ function configure_georep() {
     switch_cluster $CONTEXT_B
     local cluster_b_hostname="$(kubectl -n "$(get_cluster_namespace)" get po -l component=proxy \
                                               -o jsonpath="{.items[0].spec.nodeName}" )"
+
+    local cluster_a_id=${CLUSTER_A_ID}
+    local cluster_b_id=${CLUSTER_B_ID}
     
     # setup georeplication and create topics
     switch_cluster $CONTEXT_A
