@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+restart="${1:-0}"
 norestart="${2:-1}"
 
 : "${CONTEXT_A:=""}"
@@ -290,3 +291,9 @@ function configure_georep() {
     echo "Wait 15 seconds..."
     sleep 15
 }
+
+if [[ $restart -eq 0 ]]; then
+    configure_georep
+else
+    unconfigure_georep
+fi
