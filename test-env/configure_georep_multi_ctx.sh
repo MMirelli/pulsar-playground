@@ -95,7 +95,7 @@ function kubectl_user (){
     local kubectl_args=("-n" "$(get_cluster_namespace)")
     
     
-    if [[ $NO_USER -eq 0 ]]; then
+    if [[ $NO_KUBECTL_SA -eq 0 ]]; then
         kubectl_args+=("--as-group=system:authenticated"
                        "--as=$(get_cluster_namespace):$(get_cluster_sa)")
     fi
