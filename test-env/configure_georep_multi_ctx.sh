@@ -307,13 +307,18 @@ function configure_georep() {
     switch_cluster $CONTEXT_A
     local cluster_a_hostname="$(kubectl_user get po -l component=proxy \
                                               -o jsonpath="{.items[0].spec.nodeName}" )"
+    echo "cluster_a_hostname=${cluster_a_hostname}"
+    
+    local cluster_a_id=${CLUSTER_A_ID}
+    echo "cluster_a_id=${cluster_a_id}"
 
     switch_cluster $CONTEXT_B
     local cluster_b_hostname="$(kubectl_user get po -l component=proxy \
                                               -o jsonpath="{.items[0].spec.nodeName}" )"
+    echo "cluster_b_hostname=${cluster_b_hostname}"
 
-    local cluster_a_id=${CLUSTER_A_ID}
     local cluster_b_id=${CLUSTER_B_ID}
+    echo "cluster_b_id=${cluster_b_id}"
     
     # setup georeplication and create topics
     switch_cluster $CONTEXT_A
