@@ -11,6 +11,9 @@ norestart="${2:-1}"
 : "${NAMESPACE_CONTEXT_A:=""}"
 : "${NAMESPACE_CONTEXT_B:=""}"
 
+: "${SA_CONTEXT_A:=""}"
+: "${SA_CONTEXT_B:=""}"
+
 CLUSTER_A_ID="cluster-a"
 CLUSTER_B_ID="cluster-b"
 
@@ -76,10 +79,41 @@ function get_cluster_namespace (){
     fi
 }
 
+function get_cluster_sa (){
+    if [[ $(is_cluster ${CONTEXT_A}) -eq 1 ]]; then
+        echo "$SA_CONTEXT_A"
+    elif [[ $(is_cluster ${CONTEXT_B}) -eq 1 ]]; then
+        echo "$SA_CONTEXT_B"
+    else
+        return 1
+    fi
+}
+
+function kubectl_user (){
+    local verbose=${VERBOSE:-0}
+
+    local kubectl_args=("-n" "$(get_cluster_namespace)")
+    
+    
+    if [[ $NO_USER -eq 0 ]]; then
+        kubectl_args+=("--as-group=system:authenticated"
+                       "--as=$(get_cluster_namespace):$(get_cluster_sa)")
+    fi
+
+    kubectl_args+=("${@}")
+    
+    if [[ $verbose -eq 1 ]]; then
+        echo "+ kubectl ${kubectl_args[*]}"
+    fi
+    
+    kubectl "${kubectl_args[@]}"
+}
+
 function run_command_in_cluster() {
     local admin_script="$1"
     local flags="${2:-"-x"}"
-    kubectl exec -i -n "$(get_cluster_namespace)" "$(kubectl get pod -n "$(get_cluster_namespace)" -l component=broker -o name | head -1)" -c "$(get_cluster_fn_override)-broker" -- bash -c $flags "export PATH=/pulsar/bin:\$PATH; ${admin_script}"
+    local args=("exec" "-i" "$(kubectl_user get pod -l component=broker -o name)" "-c" "$(get_cluster_fn_override)-broker" "--" "bash" "-c" "$flags" "export PATH=/pulsar/bin:\$PATH; ${admin_script}")
+    kubectl_user "${args[@]}"
 }
 
 function stop_georep() {
@@ -205,7 +239,7 @@ function unconfigure_georep() {
 
     if [[ $norestart -ne 1 ]]; then
         # restart brokers
-        kubectl rollout restart deployment -n $(get_cluster_namespace) cluster-a-broker
+        kubectl_user rollout restart deployment  cluster-a-broker
     fi
 
     switch_cluster $CONTEXT_B
@@ -215,13 +249,13 @@ function unconfigure_georep() {
 
     if [[ $norestart -ne 1 ]]; then
         # restart brokers
-        kubectl rollout restart deployment -n $(get_cluster_namespace) cluster-b-broker
+        kubectl_user rollout restart deployment  cluster-b-broker
 
         echo "Wait for brokers to restart..."
         switch_cluster $CONTEXT_A
-        kubectl rollout status deployment -n $(get_cluster_namespace) cluster-a-broker
+        kubectl_user rollout status deployment  cluster-a-broker
         switch_cluster $CONTEXT_B
-        kubectl rollout status deployment -n $(get_cluster_namespace) cluster-b-broker
+        kubectl_user rollout status deployment  cluster-b-broker
     fi
 
     echo "Wait 10 seconds"
@@ -229,28 +263,28 @@ function unconfigure_georep() {
 }
 
 function expose_pulsar_proxy (){
-    local node_running_proxy="$(kubectl -n $(get_cluster_namespace) get po -l component=proxy \
+    local node_running_proxy="$(kubectl_user  get po -l component=proxy \
                                                                      -o jsonpath="{.items[0].spec.nodeName}" )"
-    local node_running_proxy_ip="$(kubectl get node \
+    local node_running_proxy_ip="$(kubectl_user get node \
                                                              "${node_running_proxy}" -o jsonpath="{.status.addresses[0].address}")"
     
-    kubectl patch "$(kubectl -n $(get_cluster_namespace) get svc -l component=proxy -o name)" -n $(get_cluster_namespace) -p \
+    kubectl_user patch "$(  kubectl_user  get svc -l component=proxy -o name)"  -p \
             "{\"spec\": {\"type\": \"LoadBalancer\", \"externalIPs\": [\"${node_running_proxy_ip}\"]}}"
 }
 
 function initialise_georeplication_variables (){
     export cluster_a_id="${CLUSTER_A_NAME}"
     
-    kubectl config use-context "$(nutils_get_cluster_context "${CLUSTER_A_NAME}")" && \
-        export cluster_a_hostname="$(kubectl -n $(get_cluster_namespace) get po -l component=proxy \
+    kubectl_user config use-context "$(nutils_get_cluster_context "${CLUSTER_A_NAME}")" && \
+        export cluster_a_hostname="$(  kubectl_user  get po -l component=proxy \
                                                                              -o jsonpath="{.items[0].spec.nodeName}" )" && \
         echo "cluster_a_hostname=${cluster_a_hostname}" || \
         echo "Error: impossible to set cluster_a_hostname"
     
     export cluster_b_id="${CLUSTER_B_NAME}"
     
-    kubectl config use-context "$(nutils_get_cluster_context "${CLUSTER_B_NAME}")" && \
-        export cluster_b_hostname="$(kubectl -n $(get_cluster_namespace) get po -l component=proxy \
+    kubectl_user config use-context "$(nutils_get_cluster_context "${CLUSTER_B_NAME}")" && \
+        export cluster_b_hostname="$(kubectl_user  get po -l component=proxy \
                                                                              -o jsonpath="{.items[0].spec.nodeName}" )"  && \
         echo "cluster_b_hostname=${cluster_b_hostname}" || \
         echo "Error: impossible to set cluster_b_hostname"
@@ -271,11 +305,11 @@ function configure_georep() {
     expose_pulsar_proxy
     
     switch_cluster $CONTEXT_A
-    local cluster_a_hostname="$(kubectl -n "$(get_cluster_namespace)" get po -l component=proxy \
+    local cluster_a_hostname="$(kubectl_user get po -l component=proxy \
                                               -o jsonpath="{.items[0].spec.nodeName}" )"
 
     switch_cluster $CONTEXT_B
-    local cluster_b_hostname="$(kubectl -n "$(get_cluster_namespace)" get po -l component=proxy \
+    local cluster_b_hostname="$(kubectl_user get po -l component=proxy \
                                               -o jsonpath="{.items[0].spec.nodeName}" )"
 
     local cluster_a_id=${CLUSTER_A_ID}
