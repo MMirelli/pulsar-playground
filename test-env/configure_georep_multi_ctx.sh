@@ -338,6 +338,8 @@ function configure_georep() {
 
 if [[ $restart -eq 0 ]]; then
     configure_georep
-else
+elif [[ $restart -eq 1 ]]; then
     unconfigure_georep
+else
+    echo "Not (un/)configuring georep"
 fi
