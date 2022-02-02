@@ -217,6 +217,12 @@ function unconfigure_georep() {
         echo "No restarts will be used."
     fi
 
+    local cluster_a_id=${CLUSTER_A_ID}
+    echo "cluster_a_id=${cluster_a_id}"
+    
+    local cluster_b_id=${CLUSTER_B_ID}
+    echo "cluster_b_id=${cluster_b_id}"
+    
     # georeplication has to be stopped before deleting topics
     switch_cluster $CONTEXT_A
     stop_georep "${cluster_a_id}"
