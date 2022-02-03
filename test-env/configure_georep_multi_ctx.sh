@@ -304,11 +304,11 @@ function configure_georep() {
     switch_cluster $CONTEXT_B
     local token_b=$(run_command_in_cluster "cat /pulsar/token-superuser/superuser.jwt" "")
 
-    switch_cluster $CONTEXT_A
-    expose_pulsar_proxy
+    # switch_cluster $CONTEXT_A
+    # expose_pulsar_proxy
     
-    switch_cluster $CONTEXT_B
-    expose_pulsar_proxy
+    # switch_cluster $CONTEXT_B
+    # expose_pulsar_proxy
     
     switch_cluster $CONTEXT_A
     local cluster_a_hostname="$(kubectl_user get po -l component=proxy \
