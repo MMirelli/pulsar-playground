@@ -304,23 +304,35 @@ function configure_georep() {
     switch_cluster $CONTEXT_B
     local token_b=$(run_command_in_cluster "cat /pulsar/token-superuser/superuser.jwt" "")
 
+    # node IP
     # switch_cluster $CONTEXT_A
     # expose_pulsar_proxy
     
+    # node IP
     # switch_cluster $CONTEXT_B
     # expose_pulsar_proxy
     
     switch_cluster $CONTEXT_A
-    local cluster_a_hostname="$(kubectl_user get po -l component=proxy \
-                                              -o jsonpath="{.items[0].spec.nodeName}" )"
+    # node IP
+    # local cluster_a_hostname="$(kubectl_user get po -l component=proxy \
+    #                                           -o jsonpath="{.items[0].spec.nodeName}" )"
+
+    # loadbalancer
+    local cluster_a_hostname="$(kubectl_user get svc -l component=proxy \
+                                                        -o jsonpath="{.items[0].status.LoadBalancer.ingress[0].ip}" )"
     echo "cluster_a_hostname=${cluster_a_hostname}"
     
     local cluster_a_id=${CLUSTER_A_ID}
     echo "cluster_a_id=${cluster_a_id}"
 
     switch_cluster $CONTEXT_B
-    local cluster_b_hostname="$(kubectl_user get po -l component=proxy \
-                                              -o jsonpath="{.items[0].spec.nodeName}" )"
+    # node IP
+    # local cluster_b_hostname="$(kubectl_user get po -l component=proxy \
+    #                                           -o jsonpath="{.items[0].spec.nodeName}" )"
+
+    # loadbalancer
+    local cluster_b_hostname="$(kubectl_user get svc -l component=proxy \
+                                                        -o jsonpath="{.items[0].status.LoadBalancer.ingress[0].ip}" )"
     echo "cluster_b_hostname=${cluster_b_hostname}"
 
     local cluster_b_id=${CLUSTER_B_ID}
