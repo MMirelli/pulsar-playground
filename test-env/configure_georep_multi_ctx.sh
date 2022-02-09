@@ -195,9 +195,9 @@ pulsar-admin namespaces create -b 64 ${georep_namespace}
 
 # pulsar-admin clusters create --tls-enable --tls-allow-insecure --tls-trust-certs-filepath /pulsar/certs/tls.crt --auth-plugin org.apache.pulsar.client.impl.auth.AuthenticationToken --auth-parameters "token:${peer_cluster_token}" --broker-url-secure pulsar+ssl://${peer_cluster_dns}:6651 --url-secure https://${peer_cluster_dns}:8443 ${peer_cluster_name}
 
-pulsar-admin clusters create --broker-url pulsar://${peer_cluster_dns}:6650 --url http://${peer_cluster_dns}:8080 --auth-plugin org.apache.pulsar.client.impl.auth.AuthenticationToken --auth-parameters "token:${peer_cluster_token}" ${peer_cluster_name}
+# pulsar-admin clusters create --broker-url pulsar://${peer_cluster_dns}:6650 --url http://${peer_cluster_dns}:8080 --auth-plugin org.apache.pulsar.client.impl.auth.AuthenticationToken --auth-parameters "token:${peer_cluster_token}" ${peer_cluster_name}
 
-# pulsar-admin clusters create --broker-url pulsar://${peer_cluster_dns}:6650 --url http://${peer_cluster_dns}:8080 ${peer_cluster_name}
+pulsar-admin clusters create --broker-url pulsar://${peer_cluster_dns}:6650 --url http://${peer_cluster_dns}:8080 ${peer_cluster_name}
 
 pulsar-admin tenants update --allowed-clusters "${cluster_a_id},${cluster_b_id}" ${georep_tenant}
 pulsar-admin namespaces set-clusters -c ${own_cluster_name},${peer_cluster_name} ${georep_namespace}
