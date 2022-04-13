@@ -2,6 +2,8 @@ package com.github.lhotari.pulsar.playground;
 
 import static org.apache.pulsar.shade.com.yahoo.sketches.Util.bytesToInt;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import lombok.extern.slf4j.Slf4j;
@@ -27,12 +29,13 @@ import org.apache.pulsar.shade.io.netty.util.Timer;
 public class MultiPulsarClientGenerator {
     private static final String PULSAR_HOST = System.getenv().getOrDefault("PULSAR_HOST",
             // deployed by the commmand:
-            // helm install  pulsar-testenv-deployment datastax-pulsar/pulsar --namespace pulsar-testenv --create-namespace --values ~/dev/MMirelli/pulsar-helm-chart/examples/dev-values.yaml --set fullnameOverride=pulsar-testenv-deployment --debug --wait --timeout=10m
+            // helm install  pulsar-testenv-deployment datastax-pulsar/pulsar --namespace pulsar-testenv --create-namespace --values many-connections-values.yaml --set fullnameOverride=pulsar-testenv-deployment --debug --wait --timeout=10m
             "pulsar-testenv-deployment-proxy.pulsar-testenv.svc.cluster.local");
     private static final String PULSAR_SERVICE_URL =
             System.getenv().getOrDefault("PULSAR_SERVICE_URL", "http://" + PULSAR_HOST + ":8080/");
     private static final String PULSAR_BROKER_URL =
             System.getenv().getOrDefault("PULSAR_BROKER_URL", "pulsar://" + PULSAR_HOST + ":6650/");
+    private int producerPoolSize = 10;
 
     private ExecutorProvider externalExecutorProvider =
             new ExecutorProvider(8, "shared-external-executor");
@@ -42,7 +45,7 @@ public class MultiPulsarClientGenerator {
     // shared thread pool related resources
     private static Timer sharedTimer = new HashedWheelTimer(1, TimeUnit.MILLISECONDS);;
 
-    private static int maxMessages = 10000;
+    private static int maxMessages = 10;
     private int reportingInterval = maxMessages / 10;
     private static int messageSize = 20;
 
@@ -96,41 +99,50 @@ public class MultiPulsarClientGenerator {
 
     private void spawnProducerPool(String topicName, ClientConfigurationData conf) throws Throwable {
         try {
-            // example of creating a client which uses the shared thread pools
-            PulsarClientImpl client = PulsarClientImpl.builder().conf(conf)
-                    .internalExecutorProvider(internalExecutorProvider)
-                    .externalExecutorProvider(externalExecutorProvider)
-                    .timer(sharedTimer)
+            List<Producer<byte[]>> producerPool = new ArrayList<>();
+            for (int i = 0; i < producerPoolSize; i++) {
+                PulsarClient curPulsarClient = PulsarClientImpl.builder().conf(conf)
+                        .internalExecutorProvider(internalExecutorProvider)
+                        .externalExecutorProvider(externalExecutorProvider)
+                        .timer(sharedTimer)
 //                    .eventLoopGroup(sharedEventLoopGroup)
-                    .build();
-            Policies policies = new Policies();
-            Producer<byte[]> producer = client.newProducer()
-                    .topic(topicName)
-                    .create();
-            AtomicReference<Throwable> sendFailure = new AtomicReference<>();
-            for (int i = 0; i < maxMessages; i++) {
-                // add a message to the topic
-                producer.sendAsync(intToBytes(i, messageSize)).whenComplete((messageId, throwable) -> {
-                    if (throwable != null) {
-                        log.error("Failed to send message to topic {}", topicName, throwable);
-                        sendFailure.set(throwable);
-                    }
-                });
-                if ((i + 1) % 1000 == 0) {
-                    log.info("Sent {} msgs", i + 1);
-                }
-                Throwable throwable = sendFailure.get();
-                if (throwable != null) {
-                    throw throwable;
-                }
+                        .build();
+
+                producerPool.add(curPulsarClient.newProducer()
+                        .topic(topicName)
+//                        .producerName(String.format("producer-%d", i))
+                        .create());
             }
-            log.info("Flushing");
-            producer.flush();
-            producer.close();
+            // example of creating a client which uses the shared thread pools
+            for (Producer<byte[]> pulsarProducer : producerPool) {
+                AtomicReference<Throwable> sendFailure = new AtomicReference<>();
+                for (int i = 0; i < maxMessages; i++) {
+                    // add a message to the topic
+                    pulsarProducer.sendAsync(intToBytes(i, messageSize)).whenComplete((messageId, throwable) -> {
+                        if (throwable != null) {
+                            log.error("Failed to send message to topic {}", topicName, throwable);
+                            sendFailure.set(throwable);
+                        }
+                        int messageIdInt = Integer.parseInt(messageId.toString().split(":")[messageId.toString().split(":").length-1]);
+                        if (messageIdInt % reportingInterval == 0) {
+                            log.info("Msg {} sent by producer {}", messageIdInt, pulsarProducer.getProducerName());
+                        }
+                    });
+                    Throwable throwable = sendFailure.get();
+                    if (throwable != null) {
+                        throw throwable;
+                    }
+                }
+                log.info("Flushing and closing producer {}", pulsarProducer.getProducerName());
+                pulsarProducer.flushAsync();
+                pulsarProducer.closeAsync();
+            }
         } catch (PulsarClientException e) {
             e.printStackTrace();
         }
     }
+
+
 
     private void spawnConsumerPool(String topicName,
                                    ClientConfigurationData conf) throws PulsarClientException {
@@ -142,9 +154,9 @@ public class MultiPulsarClientGenerator {
                 .build();
         ){
             // example of creating a client which uses the shared thread pools
-        int remainingMessages = maxMessages;
+        int remainingMessages = maxMessages * producerPoolSize;
         try (Consumer<byte[]> consumer = createConsumer(client, topicName)) {
-            for (int i = 0; i < maxMessages; i++) {
+            for (int i = 0; i < maxMessages * producerPoolSize; i++) {
                 Message<byte[]> msg = consumer.receive();
                 int msgNum = bytesToInt(msg.getData());
                 consumer.acknowledge(msg);
