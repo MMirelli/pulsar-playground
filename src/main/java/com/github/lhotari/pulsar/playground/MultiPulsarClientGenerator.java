@@ -1,19 +1,14 @@
 package com.github.lhotari.pulsar.playground;
 
-import java.util.concurrent.TimeUnit;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.pulsar.client.admin.PulsarAdmin;
-import org.apache.pulsar.client.api.PulsarClient;
+import org.apache.pulsar.client.admin.PulsarAdminException;
 import org.apache.pulsar.client.api.PulsarClientException;
-import org.apache.pulsar.client.impl.PulsarClientImpl;
-import org.apache.pulsar.client.impl.conf.ClientConfigurationData;
-import org.apache.pulsar.client.util.ExecutorProvider;
 import org.apache.pulsar.common.naming.NamespaceName;
 import org.apache.pulsar.common.policies.data.Policies;
-import org.apache.pulsar.shade.io.netty.channel.EventLoopGroup;
-import org.apache.pulsar.shade.io.netty.channel.epoll.EpollEventLoopGroup;
-import org.apache.pulsar.shade.io.netty.util.HashedWheelTimer;
-import org.apache.pulsar.shade.io.netty.util.Timer;
+import org.apache.pulsar.common.policies.data.RetentionPolicies;
 
+@Slf4j
 public class MultiPulsarClientGenerator {
 
     private static final String PULSAR_HOST = System.getenv().getOrDefault("PULSAR_HOST",
@@ -24,17 +19,13 @@ public class MultiPulsarClientGenerator {
             System.getenv().getOrDefault("PULSAR_SERVICE_URL", "http://" + PULSAR_HOST + ":8080/");
     private static final String PULSAR_BROKER_URL =
             System.getenv().getOrDefault("PULSAR_BROKER_URL", "pulsar://" + PULSAR_HOST + ":6650/");
-
+    
+    private int partitions = 3;
+    
     public static void main(String[] args) throws Throwable{
-
-        // setup namespace, tenant and topic
-        String namespace = "default";
-        NamespaceName namespaceName = NamespaceName.get("public", namespace);
-        String topicName = namespaceName.getPersistentTopicName("test");
-
-        PulsarAdmin pulsarAdmin = PulsarAdmin.builder().build();
-
-        System.out.println(pulsarAdmin.namespaces().getNamespaces("public"));
+        MultiPulsarClientGenerator multiPulsarClientGenerator = new MultiPulsarClientGenerator();
+        multiPulsarClientGenerator.createNamespaceAndTopic();
+//        System.out.println(pulsarAdmin.namespaces().getNamespaces("public"));
 
         // shared thread pool related resources
 //        ExecutorProvider internalExecutorProvider = new ExecutorProvider(8, "shared-internal-executor");
@@ -62,5 +53,27 @@ public class MultiPulsarClientGenerator {
 //        }
 //    }
 
+    }
+
+    private void createNamespaceAndTopic() throws PulsarClientException, PulsarAdminException {
+        // setup namespace, tenant and topic
+        String namespace = "pulsar-test";
+        NamespaceName namespaceName = NamespaceName.get("public", namespace);
+        String topicName = namespaceName.getPersistentTopicName("test-1");
+
+        PulsarAdmin pulsarAdmin = PulsarAdmin.builder().serviceHttpUrl(PULSAR_SERVICE_URL).build();
+        try {
+            Policies policies = new Policies();
+            // no retention
+            policies.retention_policies = new RetentionPolicies(0, 0);
+            pulsarAdmin.namespaces().createNamespace(namespaceName.toString(), policies);
+            pulsarAdmin.topics().createPartitionedTopic(topicName, this.partitions);
+            log.info(String.format("Topic {} created", topicName));
+        } catch (PulsarAdminException.ConflictException e) {
+            // topic exists, ignore
+            log.info("Namespace or Topic exists {}", topicName);
+        } finally {
+            pulsarAdmin.close();
+        }
     }
 }
