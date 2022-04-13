@@ -14,7 +14,7 @@ public class MultiPulsarClientGenerator {
     private static final String PULSAR_HOST = System.getenv().getOrDefault("PULSAR_HOST",
             // deployed by the commmand:
             // helm install  pulsar-testenv-deployment datastax-pulsar/pulsar --namespace pulsar-testenv --create-namespace --values ~/dev/MMirelli/pulsar-helm-chart/examples/dev-values.yaml --set fullnameOverride=pulsar-testenv-deployment --debug --wait --timeout=10m
-            "pulsar-testenv-deployment-broker.pulsar-testenv.svc.cluster.local");
+            "pulsar-testenv-deployment-proxy.pulsar-testenv.svc.cluster.local");
     private static final String PULSAR_SERVICE_URL =
             System.getenv().getOrDefault("PULSAR_SERVICE_URL", "http://" + PULSAR_HOST + ":8080/");
     private static final String PULSAR_BROKER_URL =
