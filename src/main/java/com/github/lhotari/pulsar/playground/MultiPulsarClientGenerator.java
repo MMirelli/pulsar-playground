@@ -22,8 +22,11 @@ import org.apache.pulsar.client.util.ExecutorProvider;
 import org.apache.pulsar.common.naming.NamespaceName;
 import org.apache.pulsar.common.policies.data.Policies;
 import org.apache.pulsar.common.policies.data.RetentionPolicies;
+import org.apache.pulsar.common.util.netty.EventLoopUtil;
+import org.apache.pulsar.shade.io.netty.channel.EventLoopGroup;
 import org.apache.pulsar.shade.io.netty.util.HashedWheelTimer;
 import org.apache.pulsar.shade.io.netty.util.Timer;
+import org.apache.pulsar.shade.io.netty.util.concurrent.DefaultThreadFactory;
 
 @Slf4j
 public class MultiPulsarClientGenerator {
@@ -35,7 +38,9 @@ public class MultiPulsarClientGenerator {
             System.getenv().getOrDefault("PULSAR_SERVICE_URL", "http://" + PULSAR_HOST + ":8080/");
     private static final String PULSAR_BROKER_URL =
             System.getenv().getOrDefault("PULSAR_BROKER_URL", "pulsar://" + PULSAR_HOST + ":6650/");
-    private int producerPoolSize = 10;
+    private final EventLoopGroup sharedEventLoopGroup = EventLoopUtil.newEventLoopGroup(8, false,
+            new DefaultThreadFactory("pulsar-client-io"));
+
 
     private ExecutorProvider externalExecutorProvider =
             new ExecutorProvider(8, "shared-external-executor");
@@ -49,8 +54,9 @@ public class MultiPulsarClientGenerator {
     private int reportingInterval = maxMessages / 10;
     private static int messageSize = 20;
 
-    private int partitions = 3;
+    private int producerPoolSize = 10;
 
+    private int partitions = 3;
 
     static byte[] intToBytes(final int i, int messageSize) {
         return ByteBuffer.allocate(Math.max(4, messageSize)).putInt(i).array();
@@ -85,11 +91,6 @@ public class MultiPulsarClientGenerator {
 //             just to create the subscription
 //        }
 
-//        This causes error:
-//        at org.apache.pulsar.shade.io.netty.channel.epoll.Epoll.<clinit>(Epoll.java:40)
-//	... 13 more
-//        Caused by: java.lang.IllegalStateException: Only supported on Linux
-//        EventLoopGroup sharedEventLoopGroup = new EpollEventLoopGroup();
         ClientConfigurationData conf = new ClientConfigurationData();
         conf.setServiceUrl(PULSAR_BROKER_URL);
 
@@ -100,17 +101,17 @@ public class MultiPulsarClientGenerator {
     private void spawnProducerPool(String topicName, ClientConfigurationData conf) throws Throwable {
         try {
             List<Producer<byte[]>> producerPool = new ArrayList<>();
+
             for (int i = 0; i < producerPoolSize; i++) {
                 PulsarClient curPulsarClient = PulsarClientImpl.builder().conf(conf)
                         .internalExecutorProvider(internalExecutorProvider)
                         .externalExecutorProvider(externalExecutorProvider)
                         .timer(sharedTimer)
-//                    .eventLoopGroup(sharedEventLoopGroup)
+                        .eventLoopGroup(sharedEventLoopGroup)
                         .build();
 
                 producerPool.add(curPulsarClient.newProducer()
                         .topic(topicName)
-//                        .producerName(String.format("producer-%d", i))
                         .create());
             }
             // example of creating a client which uses the shared thread pools
@@ -142,15 +143,13 @@ public class MultiPulsarClientGenerator {
         }
     }
 
-
-
     private void spawnConsumerPool(String topicName,
                                    ClientConfigurationData conf) throws PulsarClientException {
         try (PulsarClientImpl client = PulsarClientImpl.builder().conf(conf)
                 .internalExecutorProvider(internalExecutorProvider)
                 .externalExecutorProvider(externalExecutorProvider)
                 .timer(sharedTimer)
-//                    .eventLoopGroup(sharedEventLoopGroup)
+                .eventLoopGroup(sharedEventLoopGroup)
                 .build();
         ){
             // example of creating a client which uses the shared thread pools
