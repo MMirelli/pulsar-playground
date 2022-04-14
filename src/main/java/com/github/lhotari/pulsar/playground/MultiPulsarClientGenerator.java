@@ -198,7 +198,7 @@ public class MultiPulsarClientGenerator {
             }
             Policies policies = new Policies();
             // no retention
-            policies.retention_policies = new RetentionPolicies(0, 0);
+            policies.retention_policies = new RetentionPolicies(-1, -1);
             log.info("Creating new namespace {} with retention_policy:\n\t{}", namespaceName, policies.retention_policies);
             pulsarAdmin.namespaces().createNamespace(namespaceName.toString(), policies);
             pulsarAdmin.topics().createPartitionedTopic(topicName, this.partitions);
