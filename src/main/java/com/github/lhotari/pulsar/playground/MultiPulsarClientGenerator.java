@@ -1,6 +1,5 @@
 package com.github.lhotari.pulsar.playground;
 
-import static org.apache.pulsar.shade.com.yahoo.sketches.Util.bytesToInt;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
@@ -41,7 +40,7 @@ public class MultiPulsarClientGenerator {
             System.getenv().getOrDefault("PULSAR_BROKER_URL", "pulsar://" + PULSAR_HOST + ":6650/");
     public static final String tenantName = "public";
 
-    private static final int connectionsPerBroker = 1000;
+    private static final int connectionsPerBroker = 100;
     // shared thread pool related resources
     private static Timer sharedTimer = new HashedWheelTimer(1, TimeUnit.MILLISECONDS);;
 
@@ -97,14 +96,13 @@ public class MultiPulsarClientGenerator {
         conf.setServiceUrl(PULSAR_BROKER_URL);
         conf.setConnectionsPerBroker(connectionsPerBroker);
 
-//        multiPulsarClientGenerator.spawnProducerPool(topicName, conf);
+        multiPulsarClientGenerator.spawnProducerPool(topicName, conf);
         multiPulsarClientGenerator.spawnConsumerPool(topicName, conf);
     }
 
     private void spawnProducerPool(String topicName, ClientConfigurationData conf) throws Throwable {
         try {
             List<Producer<byte[]>> producerPool = new ArrayList<>();
-
             for (int i = 0; i < producerPoolSize; i++) {
                 PulsarClient curPulsarClient = PulsarClientImpl.builder().conf(conf)
                         .internalExecutorProvider(internalExecutorProvider)
@@ -144,6 +142,10 @@ public class MultiPulsarClientGenerator {
         } catch (PulsarClientException e) {
             e.printStackTrace();
         }
+    }
+
+    private static int bytesToInt(byte[] bytes) {
+        return ByteBuffer.wrap(bytes).getInt();
     }
 
     private void spawnConsumerPool(String topicName,
