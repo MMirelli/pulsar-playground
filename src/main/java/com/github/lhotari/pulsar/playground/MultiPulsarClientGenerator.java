@@ -30,6 +30,7 @@ import org.apache.pulsar.shade.io.netty.util.concurrent.DefaultThreadFactory;
 
 @Slf4j
 public class MultiPulsarClientGenerator {
+    private static boolean quickExecution = true;
     private static final String PULSAR_HOST = System.getenv().getOrDefault("PULSAR_HOST",
             // deployed by the commmand:
             // helm install  pulsar-testenv-deployment datastax-pulsar/pulsar --namespace pulsar-testenv --create-namespace --values many-connections-values.yaml --set fullnameOverride=pulsar-testenv-deployment --debug --wait --timeout=10m
@@ -38,25 +39,26 @@ public class MultiPulsarClientGenerator {
             System.getenv().getOrDefault("PULSAR_SERVICE_URL", "http://" + PULSAR_HOST + ":8080/");
     private static final String PULSAR_BROKER_URL =
             System.getenv().getOrDefault("PULSAR_BROKER_URL", "pulsar://" + PULSAR_HOST + ":6650/");
-    private final EventLoopGroup sharedEventLoopGroup = EventLoopUtil.newEventLoopGroup(8, false,
-            new DefaultThreadFactory("pulsar-client-io"));
+    public static final String tenantName = "public";
 
-
-    private ExecutorProvider externalExecutorProvider =
-            new ExecutorProvider(8, "shared-external-executor");
-    private ExecutorProvider internalExecutorProvider =
-            new ExecutorProvider(8, "shared-internal-executor");
-
+    private static final int connectionsPerBroker = 1000;
     // shared thread pool related resources
     private static Timer sharedTimer = new HashedWheelTimer(1, TimeUnit.MILLISECONDS);;
 
-    private static int maxMessages = 10;
+    private static int maxMessages = 100000;
+
     private int reportingInterval = maxMessages / 10;
     private static int messageSize = 20;
 
     private int producerPoolSize = 10;
-
     private int partitions = 3;
+    private final int nThreads = 8;
+    private final EventLoopGroup sharedEventLoopGroup = EventLoopUtil.newEventLoopGroup(nThreads, false,
+            new DefaultThreadFactory("pulsar-client-io"));
+    private ExecutorProvider externalExecutorProvider =
+            new ExecutorProvider(nThreads, "shared-external-executor");
+    private ExecutorProvider internalExecutorProvider =
+            new ExecutorProvider(nThreads, "shared-internal-executor");
 
     static byte[] intToBytes(final int i, int messageSize) {
         return ByteBuffer.allocate(Math.max(4, messageSize)).putInt(i).array();
@@ -77,24 +79,25 @@ public class MultiPulsarClientGenerator {
 
         // setup namespace, tenant and topic
         String namespace = "pulsar-test";
-        NamespaceName namespaceName = NamespaceName.get("public", namespace);
+        NamespaceName namespaceName = NamespaceName.get(tenantName, namespace);
         String topicName = namespaceName.getPersistentTopicName("test-1");
 
-        multiPulsarClientGenerator.createNamespaceAndTopic(namespaceName, topicName);
+        multiPulsarClientGenerator.createNamespaceAndTopic(namespaceName, topicName, quickExecution);
 
         // unsure creating a subscription beforehand is needed
+        // Note: no subscription is needed beforehand as long as the retention_policy is set to -1 -1
 //        PulsarClient pulsarClient = PulsarClient.builder()
 //                .serviceUrl(PULSAR_BROKER_URL)
 //                .build();
-
 //        try (Consumer<byte[]> consumer = createConsumer(pulsarClient, topicName)) {
 //             just to create the subscription
 //        }
 
         ClientConfigurationData conf = new ClientConfigurationData();
         conf.setServiceUrl(PULSAR_BROKER_URL);
+        conf.setConnectionsPerBroker(connectionsPerBroker);
 
-        multiPulsarClientGenerator.spawnProducerPool(topicName, conf);
+//        multiPulsarClientGenerator.spawnProducerPool(topicName, conf);
         multiPulsarClientGenerator.spawnConsumerPool(topicName, conf);
     }
 
@@ -155,30 +158,51 @@ public class MultiPulsarClientGenerator {
             // example of creating a client which uses the shared thread pools
         int remainingMessages = maxMessages * producerPoolSize;
         try (Consumer<byte[]> consumer = createConsumer(client, topicName)) {
+
             for (int i = 0; i < maxMessages * producerPoolSize; i++) {
                 Message<byte[]> msg = consumer.receive();
                 int msgNum = bytesToInt(msg.getData());
                 consumer.acknowledge(msg);
+                --remainingMessages;
                 if ((i + 1) % reportingInterval == 0) {
                     log.info("Received {} msgs", i + 1);
-                    log.info("Received {} remaining: {}", msgNum, --remainingMessages);
+                    log.info("Received {} remaining: {}", msgNum, remainingMessages);
                 }
             }
             consumer.close();
         }
         }
+
         log.info("Done receiving.");
     }
 
-    private void createNamespaceAndTopic(NamespaceName namespaceName, String topicName) throws PulsarClientException, PulsarAdminException {
+    private void createNamespaceAndTopic(NamespaceName namespaceName,
+                                         String topicName,
+                                         boolean quickExecution) throws PulsarClientException, PulsarAdminException {
+        boolean recreateNamespaceAndTopic = ! quickExecution;
         PulsarAdmin pulsarAdmin = PulsarAdmin.builder().serviceHttpUrl(PULSAR_SERVICE_URL).build();
         try {
+            if (recreateNamespaceAndTopic) {
+                for (String namespace : pulsarAdmin.namespaces().getNamespaces(tenantName)) {
+                    if (namespace.equals(namespaceName.toString())) {
+                        for (String curTopic : pulsarAdmin.topics().getPartitionedTopicList(namespace)) {
+                            if (curTopic.equals(topicName)) {
+                                log.info("Deleting topic {}", curTopic);
+                                pulsarAdmin.topics().deletePartitionedTopic(curTopic);
+                            }
+                        }
+                        log.info("Deleting namespace {}", namespace);
+                        pulsarAdmin.namespaces().deleteNamespace(namespaceName.toString());
+                    }
+                }
+            }
             Policies policies = new Policies();
             // no retention
             policies.retention_policies = new RetentionPolicies(0, 0);
+            log.info("Creating new namespace {} with retention_policy:\n\t{}", namespaceName, policies.retention_policies);
             pulsarAdmin.namespaces().createNamespace(namespaceName.toString(), policies);
             pulsarAdmin.topics().createPartitionedTopic(topicName, this.partitions);
-            log.info(String.format("Topic {} created", topicName));
+            log.info("Creating {}-partitioned topic {}", partitions, topicName);
         } catch (PulsarAdminException.ConflictException e) {
             // topic exists, ignore
             log.info("Namespace or Topic exists {}", topicName);
